@@ -1,0 +1,258 @@
+<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Raytraced Apple</title>
+    <script src="https://cdn.jsdelivr.net/npm/p5@1.8.0/lib/p5.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #222;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: Arial, sans-serif;
+        }
+        #canvas-container {
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: center;
+            position: relative;
+        }
+        #info {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            color: white;
+            opacity: 0.7;
+            font-size: 12px;
+            pointer-events: none;
+        }
+    </style>
+
+<base target="_self">
+
+
+    </head><body><div id="canvas-container"></div>
+    <div id="info">Drag to rotate • Scroll to zoom • Click to change color</div>
+
+    <script>
+        let sketch = function(p) {
+            let scene, camera, renderer, apple, light;
+            let color = { r: 0.8, g: 0.1, b: 0.1 };
+            let roughness = 0.5;
+            let metalness = 0.1;
+            let isDragging = false;
+            let previousMousePosition = { x: 0, y: 0 };
+            let rotationSpeed = 0.005;
+            let targetRotation = { x: 0, y: 0 };
+            let currentRotation = { x: 0, y: 0 };
+            let zoom = 5;
+            let targetZoom = 5;
+            let colorTransition = 0;
+            let isTransitioning = false;
+
+            p.setup = function() {
+                let container = document.getElementById('canvas-container');
+                let width = container.clientWidth;
+                let height = Math.min(window.innerHeight, width);
+
+                // Three.js setup
+                scene = new THREE.Scene();
+                scene.background = new THREE.Color(0x222222);
+                
+                camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
+                camera.position.z = zoom;
+
+                renderer = new THREE.WebGLRenderer({ antialias: true });
+                renderer.setSize(width, height);
+                renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+                renderer.shadowMap.enabled = true;
+                container.appendChild(renderer.domElement);
+
+                // Lighting
+                light = new THREE.DirectionalLight(0xffffff, 1);
+                light.position.set(1, 1, 1);
+                light.castShadow = true;
+                scene.add(light);
+
+                const ambientLight = new THREE.AmbientLight(0x404040);
+                scene.add(ambientLight);
+
+                // Apple geometry with slight imperfections
+                const geometry = new THREE.SphereGeometry(1, 64, 64);
+                
+                // Warp the sphere to make it more apple-like
+                const position = geometry.attributes.position;
+                for (let i = 0; i < position.count; i++) {
+                    const x = position.getX(i);
+                    const y = position.getY(i);
+                    const z = position.getZ(i);
+                    
+                    // Create slight bulge at the bottom
+                    if (y < -0.5) {
+                        const factor = 1 + (0.2 * Math.pow(y + 0.5, 2));
+                        position.setXYZ(i, x * factor, y, z * factor);
+                    }
+                    
+                    // Create slight indent at the top
+                    if (y > 0.7) {
+                        const factor = 0.9 + (0.1 * (1 - (y - 0.7) / 0.3));
+                        position.setXYZ(i, x * factor, y, z * factor);
+                    }
+                }
+                
+                // Add stem
+                const stemGeometry = new THREE.CylinderGeometry(0.05, 0.03, 0.3, 8);
+                stemGeometry.translate(0, 1.2, 0);
+                stemGeometry.rotateX(Math.PI / 6);
+                
+                const stem = new THREE.Mesh(
+                    stemGeometry,
+                    new THREE.MeshStandardMaterial({ color: 0x4a2e0a, roughness: 0.8, metalness: 0.1 })
+                );
+                scene.add(stem);
+
+                // Apple material
+                const material = new THREE.MeshStandardMaterial({
+                    color: new THREE.Color(color.r, color.g, color.b),
+                    roughness: roughness,
+                    metalness: metalness,
+                    emissive: new THREE.Color(0.1, 0, 0),
+                    emissiveIntensity: 0.1
+                });
+
+                apple = new THREE.Mesh(geometry, material);
+                apple.castShadow = true;
+                apple.receiveShadow = true;
+                scene.add(apple);
+
+                // Event listeners
+                renderer.domElement.addEventListener('mousedown', onMouseDown);
+                renderer.domElement.addEventListener('mousemove', onMouseMove);
+                renderer.domElement.addEventListener('mouseup', onMouseUp);
+                renderer.domElement.addEventListener('wheel', onMouseWheel);
+                renderer.domElement.addEventListener('click', onClick);
+
+                p.windowResized = function() {
+                    let container = document.getElementById('canvas-container');
+                    let width = container.clientWidth;
+                    let height = Math.min(window.innerHeight, width);
+                    
+                    camera.aspect = width / height;
+                    camera.updateProjectionMatrix();
+                    renderer.setSize(width, height);
+                };
+                p.windowResized();
+            };
+
+            function onMouseDown(event) {
+                isDragging = true;
+                previousMousePosition = {
+                    x: event.clientX,
+                    y: event.clientY
+                };
+            }
+
+            function onMouseMove(event) {
+                if (isDragging) {
+                    const deltaMove = {
+                        x: event.clientX - previousMousePosition.x,
+                        y: event.clientY - previousMousePosition.y
+                    };
+
+                    targetRotation.y += deltaMove.x * rotationSpeed;
+                    targetRotation.x += deltaMove.y * rotationSpeed;
+
+                    previousMousePosition = {
+                        x: event.clientX,
+                        y: event.clientY
+                    };
+                }
+            }
+
+            function onMouseUp() {
+                isDragging = false;
+            }
+
+            function onMouseWheel(event) {
+                event.preventDefault();
+                targetZoom += event.deltaY * 0.01;
+                targetZoom = Math.max(2, Math.min(10, targetZoom));
+            }
+
+            function onClick() {
+                if (!isTransitioning) {
+                    isTransitioning = true;
+                    colorTransition = 0;
+                }
+            }
+
+            p.draw = function() {
+                // Smooth rotation
+                currentRotation.x += (targetRotation.x - currentRotation.x) * 0.1;
+                currentRotation.y += (targetRotation.y - currentRotation.y) * 0.1;
+                apple.rotation.set(currentRotation.x, currentRotation.y, 0);
+
+                // Smooth zoom
+                zoom += (targetZoom - zoom) * 0.1;
+                camera.position.z = zoom;
+
+                // Color transition
+                if (isTransitioning) {
+                    colorTransition += 0.01;
+                    if (colorTransition >= 1) {
+                        colorTransition = 0;
+                        isTransitioning = false;
+                    }
+
+                    const t = easeInOutCubic(colorTransition);
+                    if (t < 0.5) {
+                        const newT = t * 2;
+                        apple.material.color.r = 0.8 * (1 - newT);
+                        apple.material.color.g = 0.1 + 0.7 * newT;
+                        apple.material.color.b = 0.1 * (1 - newT);
+                    } else {
+                        const newT = (t - 0.5) * 2;
+                        apple.material.color.r = 0.1 + 0.7 * newT;
+                        apple.material.color.g = 0.8 * (1 - newT);
+                        apple.material.color.b = 0.1 * (1 - newT);
+                    }
+                }
+
+                // Update material properties based on mouse position
+                const mouseX = p.mouseX / p.width;
+                const mouseY = p.mouseY / p.height;
+                
+                roughness = 0.3 + mouseX * 0.7;
+                metalness = mouseY * 0.5;
+                
+                apple.material.roughness = roughness;
+                apple.material.metalness = metalness;
+
+                // Light follows mouse
+                light.position.x = (mouseX - 0.5) * 4;
+                light.position.y = -(mouseY - 0.5) * 4;
+                light.position.z = 2;
+
+                renderer.render(scene, camera);
+            };
+
+            function easeInOutCubic(t) {
+                return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+            }
+        };
+
+        new p5(sketch);
+    </script>
+
+              
+          
+                
+          
+              
+</body></html>
